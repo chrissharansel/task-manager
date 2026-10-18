@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { api } from './api';
+import { api, AuthError } from './api';
 
 const AuthContext = createContext(null);
 
@@ -14,26 +14,32 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!localStorage.getItem('token')) {
+    const t = localStorage.getItem('token');
+    if (!t) {
       setLoading(false);
       return;
     }
+    // Keep cached user visible while validating (stay logged in across refresh)
     api
       .me()
       .then((d) => {
         setUser(d.user);
         localStorage.setItem('user', JSON.stringify(d.user));
       })
-      .catch(() => {
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        setUser(null);
+      .catch((err) => {
+        // Only log out on real auth failure — not network / Render cold start
+        if (err instanceof AuthError || err.message === 'Unauthorized') {
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          setUser(null);
+        }
+        // otherwise keep existing user from localStorage
       })
       .finally(() => setLoading(false));
   }, []);
 
-  const login = async (email, password) => {
-    const d = await api.login(email, password);
+  const login = async (email, password, rememberMe = true) => {
+    const d = await api.login(email, password, rememberMe);
     localStorage.setItem('token', d.token);
     localStorage.setItem('user', JSON.stringify(d.user));
     setUser(d.user);

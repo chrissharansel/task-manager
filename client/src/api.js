@@ -6,16 +6,35 @@ function token() {
   return localStorage.getItem('token');
 }
 
+export class AuthError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'AuthError';
+    this.status = 401;
+  }
+}
+
 async function request(path, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...options.headers };
   const t = token();
   if (t) headers.Authorization = `Bearer ${t}`;
-  const res = await fetch(`${API}${path}`, { ...options, headers });
+
+  let res;
+  try {
+    res = await fetch(`${API}${path}`, { ...options, headers });
+  } catch (e) {
+    // Network / Render sleep — do NOT clear session
+    throw new Error('Network error — please try again');
+  }
+
   if (res.status === 401) {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
-    if (!window.location.pathname.includes('/login')) window.location.href = '/login';
-    throw new Error('Unauthorized');
+    const err = new AuthError('Unauthorized');
+    if (!window.location.pathname.includes('/login') && !window.location.pathname.includes('/register')) {
+      window.location.href = '/login';
+    }
+    throw err;
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -27,8 +46,11 @@ async function request(path, options = {}) {
 }
 
 export const api = {
-  login: (email, password) =>
-    request('/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  login: (email, password, rememberMe = true) =>
+    request('/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password, rememberMe }),
+    }),
   register: (email, username, password) =>
     request('/register', { method: 'POST', body: JSON.stringify({ email, username, password }) }),
   me: () => request('/me'),

@@ -109,22 +109,33 @@ const WorkCompletion = mongoose.model('WorkCompletion', workCompletionSchema);
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+function isValidObjectId(id) {
+  // Must be 24-char hex string (rejects old numeric ids like 1 from JSON-era tokens)
+  return typeof id === 'string' && /^[a-fA-F0-9]{24}$/.test(id);
+}
+
 function auth(req, res, next) {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) return res.status(401).json({ error: 'Unauthorized' });
   try {
-    req.user = jwt.verify(header.slice(7), JWT_SECRET);
+    const payload = jwt.verify(header.slice(7), JWT_SECRET);
+    // Reject old JSON-DB tokens (numeric ids like 1) — client must log in again
+    if (!isValidObjectId(payload.id)) {
+      return res.status(401).json({ error: 'Invalid or expired token — please log in again' });
+    }
+    req.user = payload;
     next();
   } catch {
     return res.status(401).json({ error: 'Invalid or expired token' });
   }
 }
 
-function signToken(user) {
+function signToken(user, rememberMe = true) {
+  // Stay logged in: 90 days by default; 1 day if rememberMe is false
   return jwt.sign(
     { id: user._id.toString(), email: user.email, username: user.username },
     JWT_SECRET,
-    { expiresIn: '7d' }
+    { expiresIn: rememberMe ? '90d' : '1d' }
   );
 }
 
@@ -286,7 +297,7 @@ app.post('/api/register', async (req, res) => {
       { $set: { user_id: user._id, status: 'accepted', joined_at: new Date() } }
     );
 
-    res.status(201).json({ token: signToken(user), user: publicUser(user) });
+    res.status(201).json({ token: signToken(user, true), user: publicUser(user) });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Registration failed' });
@@ -303,7 +314,8 @@ app.post('/api/login', async (req, res) => {
     if (!user || !bcrypt.compareSync(password, user.password_hash)) {
       return res.status(401).json({ error: 'Invalid email/username or password' });
     }
-    res.json({ token: signToken(user), user: publicUser(user) });
+    const rememberMe = req.body?.rememberMe !== false;
+    res.json({ token: signToken(user, rememberMe), user: publicUser(user) });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Login failed' });
@@ -311,9 +323,14 @@ app.post('/api/login', async (req, res) => {
 });
 
 app.get('/api/me', auth, async (req, res) => {
-  const user = await User.findById(req.user.id);
-  if (!user) return res.status(401).json({ error: 'User not found' });
-  res.json({ user: publicUser(user) });
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(401).json({ error: 'User not found' });
+    res.json({ user: publicUser(user) });
+  } catch (e) {
+    console.error('/api/me', e.message);
+    return res.status(401).json({ error: 'Invalid or expired token — please log in again' });
+  }
 });
 
 app.put('/api/me/notifications', auth, async (req, res) => {
@@ -754,6 +771,15 @@ async function start() {
     console.log('='.repeat(55));
   });
 }
+
+// Express error handler — avoid process crash on CastError etc.
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err.message);
+  if (err.name === 'CastError') {
+    return res.status(400).json({ error: 'Invalid id — please log in again or refresh' });
+  }
+  res.status(500).json({ error: 'Server error' });
+});
 
 start().catch((err) => {
   console.error('Failed to start:', err);
