@@ -6,7 +6,7 @@ const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const ExcelJS = require('exceljs');
 const mongoose = require('mongoose');
 const path = require('path');
@@ -234,35 +234,39 @@ async function deleteTaskCascade(taskId) {
 }
 
 // ---------------------------------------------------------------------------
-// Email
+// Email — Resend (https://resend.com)
+// Set RESEND_API_KEY and RESEND_FROM on Render
 // ---------------------------------------------------------------------------
-function createTransporter() {
-  const host = process.env.SMTP_HOST;
-  if (!host) return null;
-  return nodemailer.createTransport({
-    host,
-    port: parseInt(process.env.SMTP_PORT || '587', 10),
-    secure: process.env.SMTP_SECURE === 'true',
-    auth: process.env.SMTP_USER
-      ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
-      : undefined,
-  });
-}
-
-const transporter = createTransporter();
+const resendApiKey = process.env.RESEND_API_KEY || '';
+const resendFrom =
+  process.env.RESEND_FROM ||
+  process.env.SMTP_FROM ||
+  'Collab Tasks <onboarding@resend.dev>';
+const resend = resendApiKey ? new Resend(resendApiKey) : null;
 
 async function sendEmail(to, subject, text, html) {
-  if (!transporter) {
+  if (!resend) {
     console.log(`[EMAIL MOCK] To: ${to}\nSubject: ${subject}\n${text}\n`);
     return { mock: true };
   }
-  return transporter.sendMail({
-    from: process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@collabtasks.local',
-    to,
-    subject,
-    text,
-    html: html || text.replace(/\n/g, '<br>'),
-  });
+  try {
+    const result = await resend.emails.send({
+      from: resendFrom,
+      to: Array.isArray(to) ? to : [to],
+      subject,
+      text,
+      html: html || text.replace(/\n/g, '<br>'),
+    });
+    if (result.error) {
+      console.error('[Resend error]', result.error);
+      throw new Error(result.error.message || 'Resend failed');
+    }
+    console.log(`[Resend] sent to ${to} id=${result.data?.id || 'ok'}`);
+    return result;
+  } catch (e) {
+    console.error('[Resend] send failed:', e.message);
+    throw e;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -726,7 +730,7 @@ setInterval(() => {
 
 app.post('/api/reminders/run', auth, async (req, res) => {
   await runReminders();
-  res.json({ ok: true, message: 'Reminder job ran (check server logs if SMTP not configured)' });
+  res.json({ ok: true, message: 'Reminder job ran (check server logs if RESEND_API_KEY not set)' });
 });
 
 // ---------------------------------------------------------------------------
@@ -767,7 +771,7 @@ async function start() {
     console.log(`  Collab Tasks API  →  ${publicUrl}`);
     console.log(`  Listening on port ${PORT}`);
     console.log(`  Default: admin@example.com / admin123`);
-    console.log(`  Email: ${transporter ? 'SMTP configured' : 'MOCK (set SMTP_* env vars)'}`);
+    console.log(`  Email: ${resend ? 'Resend configured' : 'MOCK (set RESEND_API_KEY)'}`);
     console.log('='.repeat(55));
   });
 }
