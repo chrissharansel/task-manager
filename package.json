@@ -9,8 +9,5 @@
     "build": "cd client && npm run build",
     "start": "cd server && node index.js"
   },
-  "license": "MIT",
-  "dependencies": {
-    "resend": "^6.32.1"
-  }
+  "license": "MIT"
 }

@@ -1,5 +1,8 @@
 # Collab Tasks
 
+Storage: **MongoDB** (set `MONGODB_URI`).
+
+
 Collaborative task tracker with:
 
 1. **Members by email** — invite others to a task; both track completion  
@@ -54,13 +57,49 @@ cd server && node index.js
 
 Reminder job runs every 15 minutes and respects each user’s frequency setting.
 
-## Production
+## Connecting frontend ↔ backend (hosting)
+
+### Same server (easiest)
 
 ```bash
 cd client && npm run build
 cd ../server && node index.js
-# serves API + built UI on :3001
+# API + UI both at http://YOUR_HOST:3001
 ```
+
+Keep `VITE_API_URL` empty — client uses relative `/api`.
+
+### Separate hosts (Vercel UI + Railway/Render API)
+
+**Backend env** (`server/.env` or host dashboard):
+
+```env
+PORT=3001
+JWT_SECRET=long-random-secret
+FRONTEND_URL=https://your-frontend.vercel.app
+APP_URL=https://your-frontend.vercel.app
+```
+
+**Frontend env** (must be set **before** `npm run build`):
+
+```env
+VITE_API_URL=https://your-api.railway.app/api
+```
+
+Copy from examples:
+
+- `client/.env.example` → `client/.env`
+- `server/.env.example` → `server/.env`
+
+Then rebuild the client so the API URL is baked in:
+
+```bash
+cd client && npm run build
+```
+
+### Local dev
+
+No change needed: Vite proxies `/api` → `http://localhost:3001` (see `client/vite.config.js`).
 
 ## API overview
 
@@ -75,4 +114,3 @@ cd ../server && node index.js
 | Completion | `PUT /api/works/:id/completion` |
 | Export | `GET /api/export/excel` |
 | Reminders | `POST /api/reminders/run` (manual test) |
-"# task-manager" 

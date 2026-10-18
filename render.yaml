@@ -1,0 +1,23 @@
+# Optional Blueprint — or set the same values in the Render dashboard
+services:
+  - type: web
+    name: collab-tasks
+    runtime: node
+    # Root of the service must be the folder that contains client/ and server/
+    buildCommand: cd client && npm install && npm run build && mkdir -p ../server/public && cp -r dist/* ../server/public/ && cd ../server && npm install
+    startCommand: cd server && node index.js
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: APP_URL
+        fromService:
+          type: web
+          name: collab-tasks
+          property: host
+      - key: FRONTEND_URL
+        fromService:
+          type: web
+          name: collab-tasks
+          property: host
