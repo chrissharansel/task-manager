@@ -1,4 +1,6 @@
-const API = '/api';
+// Hosting: set VITE_API_URL to your backend, e.g. https://api.example.com/api
+// Local dev: leave unset — uses /api (Vite proxy → localhost:3001)
+const API = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
 
 function token() {
   return localStorage.getItem('token');

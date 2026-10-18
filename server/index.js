@@ -8,7 +8,7 @@ const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { Resend } = require('resend');
+const nodemailer = require('nodemailer');
 const ExcelJS = require('exceljs');
 const path = require('path');
 const fs = require('fs');
@@ -18,8 +18,14 @@ const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'collab-tasks-secret-change-in-prod';
 const DB_PATH = path.join(__dirname, 'data.json');
 const APP_URL = process.env.APP_URL || 'http://localhost:5173';
+// Comma-separated list of frontend origins, e.g. https://myapp.vercel.app
+// Leave empty to allow all origins (dev-friendly)
+const FRONTEND_URL = process.env.FRONTEND_URL || '';
 
-app.use(cors({ origin: true, credentials: true }));
+const corsOrigin = FRONTEND_URL
+  ? FRONTEND_URL.split(',').map((s) => s.trim()).filter(Boolean)
+  : true;
+app.use(cors({ origin: corsOrigin, credentials: true }));
 app.use(express.json());
 
 // ---------------------------------------------------------------------------
@@ -66,40 +72,37 @@ if (db.users.length === 0) {
   console.log('>>> Default admin: admin@example.com / admin123  (username: admin)');
 }
 
-
- // ---------------------------------------------------------------------------
- // Email — Resend API
- // ---------------------------------------------------------------------------
-
-const resend = new Resend(process.env.RESEND_API_KEY);
-
-async function sendEmail(to, subject, text, html) {
-  if (!process.env.RESEND_API_KEY) {}
-
-  try {
-    const { data, error } = await resend.emails.send({
-      from:
-        process.env.RESEND_FROM ||
-        'Collab Tasks <onboarding@resend.dev>',
-      to: [to],
-      subject,
-      text,
-      html: html || text.replace(/\n/g, '<br>'),
-    });
-
-    if (error) {
-      console.error('[RESEND ERROR]', error);
-      return { error };
-    }
-
-    console.log(`[EMAIL SENT] To: ${to}, ID: ${data.id}`);
-    return data;
-  } catch (err) {
-    console.error('[RESEND ERROR]', err);
-    return { error: err.message };
-  }
+// ---------------------------------------------------------------------------
+// Email
+// ---------------------------------------------------------------------------
+function createTransporter() {
+  const host = process.env.SMTP_HOST;
+  if (!host) return null;
+  return nodemailer.createTransport({
+    host,
+    port: parseInt(process.env.SMTP_PORT || '587', 10),
+    secure: process.env.SMTP_SECURE === 'true',
+    auth: process.env.SMTP_USER
+      ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+      : undefined,
+  });
 }
 
+const transporter = createTransporter();
+
+async function sendEmail(to, subject, text, html) {
+  if (!transporter) {
+    console.log(`[EMAIL MOCK] To: ${to}\nSubject: ${subject}\n${text}\n`);
+    return { mock: true };
+  }
+  return transporter.sendMail({
+    from: process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@collabtasks.local',
+    to,
+    subject,
+    text,
+    html: html || text.replace(/\n/g, '<br>'),
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Auth helpers
@@ -682,8 +685,6 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log('='.repeat(55));
   console.log(`  Collab Tasks API  →  http://localhost:${PORT}`);
   console.log(`  Default: admin@example.com / admin123`);
-  console.log(
-  `  Email: ${process.env.RESEND_API_KEY ? 'Resend API configured' : 'NOT CONFIGURED'}`
-);
+  console.log(`  Email: ${transporter ? 'SMTP configured' : 'MOCK (set SMTP_* env vars)'}`);
   console.log('='.repeat(55));
 });
